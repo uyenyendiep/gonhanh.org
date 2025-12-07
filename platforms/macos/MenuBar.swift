@@ -217,7 +217,7 @@ class MenuBarController {
             let window = NSWindow(contentViewController: controller)
             window.title = "Giới thiệu \(AppMetadata.name)"
             window.styleMask = [.titled, .closable]
-            window.setContentSize(NSSize(width: 300, height: 340))
+            window.setContentSize(controller.view.fittingSize)
             window.center()
             window.isReleasedWhenClosed = false
             aboutWindow = window
