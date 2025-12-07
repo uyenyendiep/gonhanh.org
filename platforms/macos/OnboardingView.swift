@@ -134,8 +134,11 @@ struct OnboardingView: View {
     private func finish() {
         UserDefaults.standard.set(selectedMode.rawValue, forKey: SettingsKey.method)
         UserDefaults.standard.set(true, forKey: SettingsKey.hasCompletedOnboarding)
-        // Xóa flag restart
         UserDefaults.standard.removeObject(forKey: "gonhanh.didRestart")
+
+        // Chuyển sang accessory mode (ẩn dock icon)
+        NSApp.setActivationPolicy(.accessory)
+
         NotificationCenter.default.post(name: .onboardingCompleted, object: nil)
         NSApp.keyWindow?.close()
     }

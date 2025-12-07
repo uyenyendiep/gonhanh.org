@@ -26,17 +26,12 @@ class MenuBarController {
 
         let hasCompleted = UserDefaults.standard.bool(forKey: SettingsKey.hasCompletedOnboarding)
         let hasPermission = AXIsProcessTrusted()
-        let isPostRestart = UserDefaults.standard.bool(forKey: "gonhanh.didRestart")
 
         if hasCompleted && hasPermission {
             loadSettings()
             startEngine()
         } else {
-            // Hiện onboarding sau khi app đã khởi động xong
-            let delay = isPostRestart ? 0.1 : 0.5  // Post-restart cần ít delay hơn
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.showOnboarding()
-            }
+            showOnboarding()
         }
     }
 
@@ -190,14 +185,8 @@ class MenuBarController {
             window.isReleasedWhenClosed = false
             onboardingWindow = window
         }
-        // Tạm chuyển sang regular để hiển thị window cho accessory app
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         onboardingWindow?.makeKeyAndOrderFront(nil)
-        // Ẩn dock icon sau khi window đã hiện
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSApp.setActivationPolicy(.accessory)
-        }
     }
 
     @objc private func showAbout() {
@@ -211,12 +200,8 @@ class MenuBarController {
             window.isReleasedWhenClosed = false
             aboutWindow = window
         }
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         aboutWindow?.makeKeyAndOrderFront(nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSApp.setActivationPolicy(.accessory)
-        }
     }
 
     @objc private func openHelp() {
