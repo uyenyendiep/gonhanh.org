@@ -189,6 +189,31 @@ private struct WelcomePage: View {
     }
 }
 
+// MARK: - Permission Success Page
+
+private struct PermissionSuccessPage: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.green)
+
+            Text("Đã cấp quyền thành công")
+                .font(.system(size: 22, weight: .bold))
+
+            Text("\(AppMetadata.name) đã sẵn sàng hoạt động.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 40)
+    }
+}
+
 // MARK: - Permission Page
 
 private struct PermissionPage: View {
