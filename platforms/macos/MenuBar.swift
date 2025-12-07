@@ -180,7 +180,10 @@ class MenuBarController {
         UserDefaults.standard.set(isEnabled, forKey: SettingsKey.enabled)
         RustBridge.setEnabled(isEnabled)
         updateStatusButton()
-        updateMenu()
+        // Update method checkmarks only, toggle animates itself
+        guard let menu = statusItem.menu else { return }
+        menu.item(withTag: 10)?.state = currentMethod == .telex ? .on : .off
+        menu.item(withTag: 11)?.state = currentMethod == .vni ? .on : .off
     }
 
     @objc private func selectTelex() { setMethod(.telex) }
