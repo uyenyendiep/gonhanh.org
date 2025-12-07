@@ -8,8 +8,8 @@ struct AboutView: View {
             Spacer()
                 .frame(height: 8)
 
-            // App Logo
-            Image(nsImage: AppMetadata.displayLogo)
+            // Logo
+            Image(nsImage: AppMetadata.logo)
                 .resizable()
                 .frame(width: 80, height: 80)
 
