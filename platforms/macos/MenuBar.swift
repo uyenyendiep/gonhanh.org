@@ -379,11 +379,13 @@ class MenuBarController: NSObject, NSWindowDelegate {
 
         image.lockFocus()
 
+        // Draw rounded rect background (black for template)
         let rect = NSRect(x: 0, y: 0, width: width, height: height)
         let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
-        NSColor.white.setFill()
+        NSColor.black.setFill()
         path.fill()
 
+        // Cut out text as transparent
         let font = NSFont.systemFont(ofSize: 13, weight: .bold)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
@@ -396,12 +398,13 @@ class MenuBarController: NSObject, NSWindowDelegate {
             width: textSize.width,
             height: textSize.height
         )
-
         NSGraphicsContext.current?.compositingOperation = .destinationOut
         text.draw(in: textRect, withAttributes: attrs)
 
         image.unlockFocus()
-        image.isTemplate = false
+
+        // Template image: macOS auto-adjusts color for light/dark menu bar
+        image.isTemplate = true
         return image
     }
 
