@@ -525,7 +525,41 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     if bundleId == "com.apple.Spotlight" { Log.method("auto:spotlight"); return (.autocomplete, (0, 0, 0)) }
 
     // Browser address bars (AXTextField with autocomplete)
-    let browsers = ["com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser"]
+    let browsers = [
+        // Chromium-based
+        "com.google.Chrome",             // Google Chrome
+        "com.google.Chrome.canary",      // Chrome Canary
+        "com.google.Chrome.beta",        // Chrome Beta
+        "org.chromium.Chromium",         // Chromium
+        "com.brave.Browser",             // Brave
+        "com.brave.Browser.beta",        // Brave Beta
+        "com.microsoft.edgemac",         // Microsoft Edge
+        "com.microsoft.edgemac.Beta",    // Edge Beta
+        "com.microsoft.edgemac.Dev",     // Edge Dev
+        "com.microsoft.edgemac.Canary",  // Edge Canary
+        "com.vivaldi.Vivaldi",           // Vivaldi
+        "ru.yandex.desktop.yandex-browser", // Yandex Browser
+        // Opera
+        "com.opera.Opera",               // Opera
+        "com.operasoftware.Opera",       // Opera (alt)
+        "com.operasoftware.OperaGX",     // Opera GX
+        "com.operasoftware.OperaAir",    // Opera Air
+        "com.opera.OperaNext",           // Opera Next
+        // Firefox
+        "org.mozilla.firefox",           // Firefox
+        "org.mozilla.firefoxdeveloperedition", // Firefox Developer
+        "org.mozilla.nightly",           // Firefox Nightly
+        // Safari
+        "com.apple.Safari",              // Safari
+        "com.apple.SafariTechnologyPreview", // Safari Tech Preview
+        // Arc & Others
+        "company.thebrowser.Browser",    // The Browser Company
+        "company.thebrowser.Arc",        // Arc
+        "app.sigmaos.sigmaos",           // SigmaOS
+        "com.nicholaskuecherer.Orion",   // Orion
+        "com.nicholaskuecherer.Sidekick",// Sidekick
+        "io.nicholaskuecherer.polypane"  // Polypane
+    ]
     if browsers.contains(bundleId) && role == "AXTextField" { Log.method("sel:browser"); return (.selection, (0, 0, 0)) }
     if role == "AXTextField" && bundleId.hasPrefix("com.jetbrains") { Log.method("sel:jb"); return (.selection, (0, 0, 0)) }
     if bundleId == "com.microsoft.Excel" { Log.method("sel:excel"); return (.selection, (0, 0, 0)) }
