@@ -533,11 +533,13 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
         "org.chromium.Chromium",         // Chromium
         "com.brave.Browser",             // Brave
         "com.brave.Browser.beta",        // Brave Beta
+        "com.brave.Browser.nightly",     // Brave Nightly
         "com.microsoft.edgemac",         // Microsoft Edge
         "com.microsoft.edgemac.Beta",    // Edge Beta
         "com.microsoft.edgemac.Dev",     // Edge Dev
         "com.microsoft.edgemac.Canary",  // Edge Canary
         "com.vivaldi.Vivaldi",           // Vivaldi
+        "com.vivaldi.Vivaldi.snapshot",  // Vivaldi Snapshot
         "ru.yandex.desktop.yandex-browser", // Yandex Browser
         // Opera
         "com.opera.Opera",               // Opera
@@ -545,20 +547,30 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
         "com.operasoftware.OperaGX",     // Opera GX
         "com.operasoftware.OperaAir",    // Opera Air
         "com.opera.OperaNext",           // Opera Next
-        // Firefox
+        // Firefox-based
         "org.mozilla.firefox",           // Firefox
         "org.mozilla.firefoxdeveloperedition", // Firefox Developer
         "org.mozilla.nightly",           // Firefox Nightly
+        "org.waterfoxproject.waterfox",  // Waterfox
+        "io.gitlab.librewolf-community.librewolf", // LibreWolf
+        "one.ablaze.floorp",             // Floorp
+        "org.torproject.torbrowser",     // Tor Browser
+        "net.mullvad.mullvadbrowser",    // Mullvad Browser
         // Safari
         "com.apple.Safari",              // Safari
         "com.apple.SafariTechnologyPreview", // Safari Tech Preview
+        // WebKit-based
+        "com.kagi.kagimacOS",            // Orion (Kagi)
         // Arc & Others
         "company.thebrowser.Browser",    // The Browser Company
         "company.thebrowser.Arc",        // Arc
-        "app.sigmaos.sigmaos",           // SigmaOS
-        "com.nicholaskuecherer.Orion",   // Orion
-        "com.nicholaskuecherer.Sidekick",// Sidekick
-        "io.nicholaskuecherer.polypane"  // Polypane
+        "company.thebrowser.dia",        // Dia (The Browser Company)
+        "app.zen-browser.zen",           // Zen Browser
+        "com.sigmaos.sigmaos.macos",     // SigmaOS
+        "com.pushplaylabs.sidekick",     // Sidekick
+        "com.firstversionist.polypane",  // Polypane
+        "ai.perplexity.comet",           // Comet (Perplexity AI)
+        "com.duckduckgo.macos.browser"   // DuckDuckGo
     ]
     if browsers.contains(bundleId) && role == "AXTextField" { Log.method("sel:browser"); return (.selection, (0, 0, 0)) }
     if role == "AXTextField" && bundleId.hasPrefix("com.jetbrains") { Log.method("sel:jb"); return (.selection, (0, 0, 0)) }
