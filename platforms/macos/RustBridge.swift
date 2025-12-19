@@ -46,6 +46,7 @@ private enum InjectionMethod {
     case slow           // Terminals/Electron: backspace + text with higher delays
     case selection      // Browser address bars: Shift+Left select + type replacement
     case autocomplete   // Spotlight: Forward Delete + backspace + text via proxy
+    case selectAll      // Select All + Replace: Cmd+A + type full buffer (for autocomplete apps)
 }
 
 // MARK: - Text Injector
@@ -57,18 +58,61 @@ private class TextInjector {
     /// Semaphore to block keyboard callback until injection completes
     private let semaphore = DispatchSemaphore(value: 1)
 
+    /// Session buffer for selectAll method - tracks full text for Cmd+A replacement
+    private var sessionBuffer: String = ""
+
     private init() {}
+
+    /// Update session buffer with new composed text
+    /// Called before injection to track full session text
+    func updateSessionBuffer(backspace: Int, newText: String) {
+        if backspace > 0 && sessionBuffer.count >= backspace {
+            sessionBuffer.removeLast(backspace)
+        }
+        sessionBuffer.append(newText)
+    }
+
+    /// Clear session buffer (call on focus change, submit, etc.)
+    func clearSessionBuffer() {
+        sessionBuffer = ""
+    }
+
+    /// Set session buffer to specific value (for restoring after paste, etc.)
+    func setSessionBuffer(_ text: String) {
+        sessionBuffer = text
+    }
+
+    /// Get current session buffer
+    func getSessionBuffer() -> String {
+        return sessionBuffer
+    }
+
+    /// Inject selectAll only (session buffer already updated)
+    func injectSelectAllOnly(proxy: CGEventTapProxy) {
+        semaphore.wait()
+        defer { semaphore.signal() }
+
+        injectViaSelectAll(proxy: proxy)
+        usleep(5000)  // Settle time
+    }
 
     /// Inject text replacement synchronously (blocks until complete)
     func injectSync(bs: Int, text: String, method: InjectionMethod, delays: (UInt32, UInt32, UInt32), proxy: CGEventTapProxy) {
         semaphore.wait()
         defer { semaphore.signal() }
 
+        // Update session buffer for selectAll method
+        if method == .selectAll {
+            updateSessionBuffer(backspace: bs, newText: text)
+        }
+
         switch method {
         case .selection:
             injectViaSelection(bs: bs, text: text, delays: delays)
         case .autocomplete:
             injectViaAutocomplete(bs: bs, text: text, proxy: proxy)
+        case .selectAll:
+            injectViaSelectAll(proxy: proxy)
         case .slow, .fast:
             injectViaBackspace(bs: bs, text: text, delays: delays)
         }
@@ -130,6 +174,28 @@ private class TextInjector {
         // Type replacement text
         postText(text, source: src, proxy: proxy)
         Log.send("auto", bs, text)
+    }
+
+    /// Select All injection: Select all text then type full session buffer
+    /// Used for apps with aggressive autocomplete (Arc, Spotlight on macOS 13)
+    /// Session buffer tracks ALL text typed in this session, not just current word
+    private func injectViaSelectAll(proxy: CGEventTapProxy) {
+        guard let src = CGEventSource(stateID: .privateState) else { return }
+
+        // Get full session buffer (all text typed in this session)
+        let fullText = sessionBuffer
+        guard !fullText.isEmpty else { return }
+
+        // Select all using Cmd+Left (home) + Shift+Cmd+Right (select to end)
+        // This works better in Arc browser than Cmd+A
+        postKey(KeyCode.leftArrow, source: src, flags: .maskCommand, proxy: proxy)  // Cmd+Left = Home
+        usleep(5000)
+        postKey(0x7C, source: src, flags: [.maskCommand, .maskShift], proxy: proxy)  // Shift+Cmd+Right = Select to end
+        usleep(5000)
+
+        // Type full session buffer (replaces all selected text)
+        postText(fullText, source: src, proxy: proxy)
+        Log.send("selAll", 0, fullText)
     }
 
     // MARK: - Helpers
@@ -222,6 +288,9 @@ private struct ImeResult {
 // Word Restore FFI
 @_silgen_name("ime_restore_word") private func ime_restore_word(_ word: UnsafePointer<CChar>?)
 
+// Buffer FFI (for Select All method)
+@_silgen_name("ime_get_buffer") private func ime_get_buffer(_ out: UnsafeMutablePointer<UInt32>, _ maxLen: Int) -> Int
+
 // MARK: - RustBridge (Public API)
 
 class RustBridge {
@@ -284,6 +353,14 @@ class RustBridge {
     }
 
     static func clearBuffer() { ime_clear() }
+
+    /// Get full composed buffer as string (for Select All injection method)
+    static func getFullBuffer() -> String {
+        var buffer = [UInt32](repeating: 0, count: 64)
+        let len = ime_get_buffer(&buffer, 64)
+        guard len > 0 else { return "" }
+        return String(buffer[0..<len].compactMap { Unicode.Scalar($0).map(Character.init) })
+    }
 
     /// Restore buffer from a Vietnamese word (for backspace-into-word editing)
     static func restoreWord(_ word: String) {
@@ -641,6 +718,54 @@ private func keyboardCallback(
         return nil
     }
 
+    // Clear session buffer on Enter/Escape (submit or cancel)
+    if keyCode == 0x24 || keyCode == 0x35 {  // Enter or Escape
+        TextInjector.shared.clearSessionBuffer()
+        RustBridge.clearBuffer()
+        return Unmanaged.passUnretained(event)
+    }
+
+    // Detect injection method once per keystroke (expensive AX query)
+    let (method, delays) = detectMethod()
+
+    // Pass through all Cmd+key shortcuts (Cmd+A, Cmd+C, Cmd+V, Cmd+X, Cmd+Z, etc.)
+    // For selectAll method: sync session buffer after text-modifying shortcuts
+    if flags.contains(.maskCommand) && !flags.contains(.maskControl) && !flags.contains(.maskAlternate) {
+
+        // Shortcuts that modify text content
+        let textModifyingKeys: Set<UInt16> = [
+            0x00,  // Cmd+A (select all)
+            0x09,  // Cmd+V (paste)
+            0x07,  // Cmd+X (cut)
+            0x06,  // Cmd+Z (undo)
+        ]
+
+        if textModifyingKeys.contains(keyCode) {
+            RustBridge.clearBuffer()
+
+            if method == .selectAll {
+                if keyCode == 0x00 {
+                    // Cmd+A: clear session buffer, let next backspace pass through to delete selection
+                    TextInjector.shared.clearSessionBuffer()
+                } else {
+                    // Cmd+V, Cmd+X, Cmd+Z: sync session buffer from field after action completes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if let text = getTextFromFocusedElement() {
+                            TextInjector.shared.setSessionBuffer(text)
+                            Log.info("Session buffer synced: \(text)")
+                        } else {
+                            TextInjector.shared.clearSessionBuffer()
+                        }
+                    }
+                }
+            } else {
+                TextInjector.shared.clearSessionBuffer()
+            }
+        }
+        // Pass through all Cmd shortcuts
+        return Unmanaged.passUnretained(event)
+    }
+
     let shift = flags.contains(.maskShift)
     let caps = shift || flags.contains(.maskAlphaShift)
     let ctrl = flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate)
@@ -648,11 +773,26 @@ private func keyboardCallback(
     // Backspace handling: try to restore word from screen when backspacing into it
     // This enables editing marks on previously committed words
     if keyCode == KeyCode.backspace && !ctrl {
+        // For selectAll method: handle backspace
+        if method == .selectAll {
+            let session = TextInjector.shared.getSessionBuffer()
+            if !session.isEmpty {
+                // Session has content - remove last char and re-inject
+                TextInjector.shared.updateSessionBuffer(backspace: 1, newText: "")
+                TextInjector.shared.injectSelectAllOnly(proxy: proxy)
+                return nil
+            } else {
+                // Session is empty (after Cmd+A, etc.) - pass through backspace to delete selection
+                Log.info("selectAll: pass through backspace (empty session)")
+                return Unmanaged.passUnretained(event)
+            }
+        }
+
         // First try Rust engine (handles immediate backspace-after-space)
         if let (bs, chars) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
             let str = String(chars)
             Log.transform(bs, str)
-            sendReplacement(backspace: bs, chars: chars, proxy: proxy)
+            sendReplacement(backspace: bs, chars: chars, method: method, delays: delays, proxy: proxy)
             return nil
         }
 
@@ -670,8 +810,19 @@ private func keyboardCallback(
     if let (bs, chars) = RustBridge.processKey(keyCode: keyCode, caps: caps, ctrl: ctrl, shift: shift) {
         let str = String(chars)
         Log.transform(bs, str)
-        sendReplacement(backspace: bs, chars: chars, proxy: proxy)
+        sendReplacement(backspace: bs, chars: chars, method: method, delays: delays, proxy: proxy)
         return nil
+    }
+
+    // For selectAll method: handle pass-through keys (space, punctuation, etc.)
+    // These need to be appended to session buffer and trigger Cmd+A replacement
+    if method == .selectAll {
+        // Convert keyCode to character
+        if let char = keyCodeToChar(keyCode: keyCode, shift: shift) {
+            TextInjector.shared.updateSessionBuffer(backspace: 0, newText: String(char))
+            TextInjector.shared.injectSelectAllOnly(proxy: proxy)
+            return nil
+        }
     }
 
     // Debug: log frontmost app for all keystrokes
@@ -680,6 +831,67 @@ private func keyboardCallback(
     }
     Log.key(keyCode, "pass")
     return Unmanaged.passUnretained(event)
+}
+
+// MARK: - Helper Functions
+
+/// Get text value from focused element (for syncing session buffer after paste)
+private func getTextFromFocusedElement() -> String? {
+    let systemWide = AXUIElementCreateSystemWide()
+    var focused: CFTypeRef?
+
+    guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+          let el = focused else {
+        return nil
+    }
+
+    let axEl = el as! AXUIElement
+
+    // Get text value
+    var textValue: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(axEl, kAXValueAttribute as CFString, &textValue) == .success,
+          let text = textValue as? String else {
+        return nil
+    }
+
+    return text
+}
+
+/// Convert keyCode to character (for pass-through keys in selectAll mode)
+private func keyCodeToChar(keyCode: UInt16, shift: Bool) -> Character? {
+    // Full keyCode to character mapping for selectAll mode
+    let keyMap: [UInt16: (normal: Character, shifted: Character)] = [
+        // Letters
+        0x00: ("a", "A"), 0x0B: ("b", "B"), 0x08: ("c", "C"), 0x02: ("d", "D"),
+        0x0E: ("e", "E"), 0x03: ("f", "F"), 0x05: ("g", "G"), 0x04: ("h", "H"),
+        0x22: ("i", "I"), 0x26: ("j", "J"), 0x28: ("k", "K"), 0x25: ("l", "L"),
+        0x2E: ("m", "M"), 0x2D: ("n", "N"), 0x1F: ("o", "O"), 0x23: ("p", "P"),
+        0x0C: ("q", "Q"), 0x0F: ("r", "R"), 0x01: ("s", "S"), 0x11: ("t", "T"),
+        0x20: ("u", "U"), 0x09: ("v", "V"), 0x0D: ("w", "W"), 0x07: ("x", "X"),
+        0x10: ("y", "Y"), 0x06: ("z", "Z"),
+        // Numbers
+        0x12: ("1", "!"), 0x13: ("2", "@"), 0x14: ("3", "#"), 0x15: ("4", "$"),
+        0x17: ("5", "%"), 0x16: ("6", "^"), 0x1A: ("7", "&"), 0x1C: ("8", "*"),
+        0x19: ("9", "("), 0x1D: ("0", ")"),
+        // Punctuation
+        0x31: (" ", " "),      // Space
+        0x2B: (",", "<"),      // Comma
+        0x2F: (".", ">"),      // Period
+        0x2C: ("/", "?"),      // Slash
+        0x27: ("'", "\""),     // Quote
+        0x29: (";", ":"),      // Semicolon
+        0x1E: ("]", "}"),      // Right bracket
+        0x21: ("[", "{"),      // Left bracket
+        0x2A: ("\\", "|"),     // Backslash
+        0x18: ("=", "+"),      // Equal
+        0x1B: ("-", "_"),      // Minus
+        0x32: ("`", "~"),      // Grave
+    ]
+
+    if let chars = keyMap[keyCode] {
+        return shift ? chars.shifted : chars.normal
+    }
+    return nil
 }
 
 // MARK: - Text Replacement
@@ -723,8 +935,22 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     if role == "AXComboBox" { Log.method("sel:combo"); return (.selection, (0, 0, 0)) }
     if role == "AXSearchField" { Log.method("sel:search"); return (.selection, (0, 0, 0)) }
 
-    // Spotlight - use autocomplete method with Forward Delete to clear suggestions
-    if bundleId == "com.apple.Spotlight" { Log.method("auto:spotlight"); return (.autocomplete, (0, 0, 0)) }
+    // Spotlight - use selectAll for macOS 13 and earlier, autocomplete for macOS 14+
+    if bundleId == "com.apple.Spotlight" {
+        if #available(macOS 14, *) {
+            Log.method("auto:spotlight")
+            return (.autocomplete, (0, 0, 0))
+        } else {
+            Log.method("selAll:spotlight")
+            return (.selectAll, (0, 0, 0))
+        }
+    }
+
+    // Arc browser - test Select All method for address bar
+    if bundleId == "company.thebrowser.Browser" && role == "AXTextField" {
+        Log.method("selAll:arc")
+        return (.selectAll, (0, 0, 0))
+    }
 
     // Browser address bars (AXTextField with autocomplete)
     let browsers = [
@@ -807,8 +1033,7 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     return (.fast, (1000, 3000, 1500))
 }
 
-private func sendReplacement(backspace bs: Int, chars: [Character], proxy: CGEventTapProxy) {
-    let (method, delays) = detectMethod()
+private func sendReplacement(backspace bs: Int, chars: [Character], method: InjectionMethod, delays: (UInt32, UInt32, UInt32), proxy: CGEventTapProxy) {
     let str = String(chars)
 
     // Use TextInjector for synchronized text injection
@@ -854,6 +1079,7 @@ class PerAppModeManager {
         currentBundleId = bundleId
 
         RustBridge.clearBuffer()
+        TextInjector.shared.clearSessionBuffer()
 
         guard AppState.shared.isSmartModeEnabled else { return }
 
