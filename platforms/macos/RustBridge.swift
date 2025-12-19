@@ -208,6 +208,9 @@ private struct ImeResult {
 @_silgen_name("ime_method") private func ime_method(_ method: UInt8)
 @_silgen_name("ime_enabled") private func ime_enabled(_ enabled: Bool)
 @_silgen_name("ime_skip_w_shortcut") private func ime_skip_w_shortcut(_ skip: Bool)
+@_silgen_name("ime_esc_restore") private func ime_esc_restore(_ enabled: Bool)
+@_silgen_name("ime_free_tone") private func ime_free_tone(_ enabled: Bool)
+@_silgen_name("ime_modern") private func ime_modern(_ modern: Bool)
 @_silgen_name("ime_clear") private func ime_clear()
 @_silgen_name("ime_free") private func ime_free(_ result: UnsafeMutablePointer<ImeResult>?)
 
@@ -260,6 +263,24 @@ class RustBridge {
     static func setSkipWShortcut(_ skip: Bool) {
         ime_skip_w_shortcut(skip)
         Log.info("Skip W shortcut: \(skip)")
+    }
+
+    /// Set whether ESC key restores raw ASCII input
+    static func setEscRestore(_ enabled: Bool) {
+        ime_esc_restore(enabled)
+        Log.info("ESC restore: \(enabled)")
+    }
+
+    /// Set whether to enable free tone placement (skip validation)
+    static func setFreeTone(_ enabled: Bool) {
+        ime_free_tone(enabled)
+        Log.info("Free tone: \(enabled)")
+    }
+
+    /// Set whether to use modern orthography for tone placement
+    static func setModernTone(_ modern: Bool) {
+        ime_modern(modern)
+        Log.info("Modern tone: \(modern)")
     }
 
     static func clearBuffer() { ime_clear() }
@@ -389,7 +410,8 @@ private let kModifierMask: CGEventFlags = [.maskControl, .maskAlternate, .maskSh
 private var wasModifierShortcutPressed = false
 private var currentShortcut = KeyboardShortcut.load()
 private var isRecordingShortcut = false
-private var recordingModifiers: CGEventFlags = []
+private var recordingModifiers: CGEventFlags = []      // Current modifiers being held
+private var peakRecordingModifiers: CGEventFlags = []  // Peak modifiers during recording
 private var shortcutObserver: NSObjectProtocol?
 
 // MARK: - Word Restore Support
@@ -505,8 +527,17 @@ private extension CGEventFlags {
 
 // MARK: - Shortcut Recording
 
-func startShortcutRecording() { isRecordingShortcut = true; recordingModifiers = [] }
-func stopShortcutRecording() { isRecordingShortcut = false; recordingModifiers = [] }
+func startShortcutRecording() {
+    isRecordingShortcut = true
+    recordingModifiers = []
+    peakRecordingModifiers = []
+}
+
+func stopShortcutRecording() {
+    isRecordingShortcut = false
+    recordingModifiers = []
+    peakRecordingModifiers = []
+}
 
 func setupShortcutObserver() {
     shortcutObserver = NotificationCenter.default.addObserver(forName: .shortcutChanged, object: nil, queue: .main) { _ in
@@ -552,19 +583,24 @@ private func keyboardCallback(
             return nil
         }
 
-        // Modifier changes: track or save modifier-only shortcut on release
+        // Modifier changes: track peak modifiers and save on full release
         if type == .flagsChanged {
-            if mods.isEmpty && recordingModifiers.modifierCount >= 2 {
-                let captured = KeyboardShortcut(keyCode: 0xFFFF, modifiers: recordingModifiers.rawValue)
+            if mods.isEmpty && peakRecordingModifiers.modifierCount >= 2 {
+                // All modifiers released - save using peak modifiers (requires 2+ modifiers)
+                let captured = KeyboardShortcut(keyCode: 0xFFFF, modifiers: peakRecordingModifiers.rawValue)
                 stopShortcutRecording()
                 DispatchQueue.main.async { NotificationCenter.default.post(name: .shortcutRecorded, object: captured) }
             } else {
                 recordingModifiers = mods
+                // Track peak: update if current has more modifiers
+                if mods.modifierCount > peakRecordingModifiers.modifierCount {
+                    peakRecordingModifiers = mods
+                }
             }
             return Unmanaged.passUnretained(event)
         }
 
-        // Key + modifiers: save shortcut (e.g., Ctrl+Shift+N)
+        // Key + modifier: save shortcut (e.g., Ctrl+N, Cmd+Shift+N)
         if type == .keyDown && !mods.isEmpty {
             let captured = KeyboardShortcut(keyCode: keyCode, modifiers: mods.rawValue)
             stopShortcutRecording()

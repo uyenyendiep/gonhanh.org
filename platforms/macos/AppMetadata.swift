@@ -75,6 +75,8 @@ enum SettingsKey {
     static let perAppModes = "gonhanh.perAppModes"
     static let shortcuts = "gonhanh.shortcuts"
     static let autoWShortcut = "gonhanh.autoWShortcut"
+    static let escRestore = "gonhanh.escRestore"
+    static let modernTone = "gonhanh.modernTone"
 }
 
 // MARK: - Keyboard Shortcut Model
@@ -174,6 +176,9 @@ struct KeyboardShortcut: Codable, Equatable {
             UserDefaults.standard.set(data, forKey: SettingsKey.toggleShortcut)
         }
     }
+
+    /// Check if this shortcut is modifier-only (no character key)
+    var isModifierOnly: Bool { keyCode == 0xFFFF }
 }
 
 // MARK: - Input Mode
