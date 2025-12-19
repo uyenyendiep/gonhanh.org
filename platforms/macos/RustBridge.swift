@@ -538,6 +538,14 @@ private func keyboardCallback(
         return Unmanaged.passUnretained(event)
     }
 
+    // Check for special panel apps (Spotlight, Raycast) on keyboard events
+    // These apps don't trigger NSWorkspaceDidActivateApplicationNotification
+    if type == .keyDown || type == .keyUp {
+        DispatchQueue.main.async {
+            PerAppModeManager.shared.checkSpecialPanelApp()
+        }
+    }
+
     let flags = event.flags
 
     // MARK: Shortcut Recording Mode
@@ -786,6 +794,7 @@ class PerAppModeManager {
 
     private var currentBundleId: String?
     private var observer: NSObjectProtocol?
+    private var mouseClickMonitor: Any?
 
     private init() {}
 
@@ -800,8 +809,17 @@ class PerAppModeManager {
         ) { [weak self] notification in
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   let bundleId = app.bundleIdentifier else { return }
+            // Update SpecialPanelAppDetector's last frontmost app
+            SpecialPanelAppDetector.updateLastFrontMostApp(bundleId)
             self?.handleAppSwitch(bundleId)
         }
+        
+        // Monitor mouse clicks to detect special panel apps (Spotlight, Raycast)
+        // These apps don't trigger NSWorkspaceDidActivateApplicationNotification
+        mouseClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.checkSpecialPanelApp()
+        }
+        
         Log.info("PerAppModeManager started")
     }
 
@@ -810,6 +828,22 @@ class PerAppModeManager {
         if let observer = observer {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             self.observer = nil
+        }
+        if let monitor = mouseClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseClickMonitor = nil
+        }
+    }
+
+    /// Check for special panel apps on keyboard events
+    /// Call this from the keyboard callback
+    func checkSpecialPanelApp() {
+        guard AppState.shared.isSmartModeEnabled else { return }
+        
+        let (appChanged, newBundleId, _) = SpecialPanelAppDetector.checkForAppChange()
+        
+        if appChanged, let bundleId = newBundleId {
+            handleAppSwitch(bundleId)
         }
     }
 

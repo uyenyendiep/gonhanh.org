@@ -40,9 +40,13 @@ class AppState: ObservableObject {
             NotificationCenter.default.post(name: .menuStateChanged, object: nil)
             guard !isSilentUpdate else { return }
             UserDefaults.standard.set(isEnabled, forKey: SettingsKey.enabled)
-            if isSmartModeEnabled,
-               let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier {
-                savePerAppMode(bundleId: bundleId, enabled: isEnabled)
+            if isSmartModeEnabled {
+                // Check if a special panel app (Spotlight, Raycast) is currently focused
+                if let activePanelApp = SpecialPanelAppDetector.getActiveSpecialPanelApp() {
+                    savePerAppMode(bundleId: activePanelApp, enabled: isEnabled)
+                } else if let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier {
+                    savePerAppMode(bundleId: bundleId, enabled: isEnabled)
+                }
             }
         }
     }
