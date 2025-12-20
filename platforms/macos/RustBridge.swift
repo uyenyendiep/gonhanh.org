@@ -45,8 +45,9 @@ private enum InjectionMethod {
     case fast           // Default: backspace + text with minimal delays
     case slow           // Terminals/Electron: backspace + text with higher delays
     case selection      // Browser address bars: Shift+Left select + type replacement
-    case autocomplete   // Spotlight: Forward Delete + backspace + text via proxy
+    case autocomplete   // Spotlight fallback: Forward Delete + backspace + text via proxy
     case selectAll      // Select All + Replace: Cmd+A + type full buffer (for autocomplete apps)
+    case axDirect       // Spotlight primary: AX API direct text manipulation (macOS 13+)
 }
 
 // MARK: - Text Injector
@@ -111,6 +112,8 @@ private class TextInjector {
             injectViaSelection(bs: bs, text: text, delays: delays)
         case .autocomplete:
             injectViaAutocomplete(bs: bs, text: text, proxy: proxy)
+        case .axDirect:
+            injectViaAXWithFallback(bs: bs, text: text, proxy: proxy)
         case .selectAll:
             injectViaSelectAll(proxy: proxy)
         case .slow, .fast:
@@ -211,6 +214,113 @@ private class TextInjector {
         // Type full session buffer (replaces all selected text)
         postText(fullText, source: src, proxy: proxy)
         Log.send("selAll", 0, fullText)
+    }
+
+    /// AX API injection: Directly manipulate text field via Accessibility API
+    /// Used for Spotlight on macOS 13+ where synthetic keyboard events are unreliable
+    /// This approach bypasses autocomplete behavior entirely by setting kAXValueAttribute directly
+    /// Returns true if successful, false if AX API fails (caller should fallback to synthetic events)
+    func injectViaAX(bs: Int, text: String) -> Bool {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focused: CFTypeRef?
+
+        // Get focused element
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let el = focused else {
+            Log.info("AX: no focused element")
+            return false
+        }
+
+        let axEl = el as! AXUIElement
+
+        // Get current text value
+        var textValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axEl, kAXValueAttribute as CFString, &textValue) == .success else {
+            Log.info("AX: can't read value")
+            return false
+        }
+
+        let currentText = (textValue as? String) ?? ""
+
+        // Get selected text range (cursor position)
+        var rangeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success else {
+            Log.info("AX: can't read range")
+            return false
+        }
+
+        // Extract CFRange from AXValue
+        var range = CFRange(location: 0, length: 0)
+        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else {
+            Log.info("AX: can't decode range")
+            return false
+        }
+
+        let cursorPos = range.location
+        guard cursorPos >= 0 else {
+            Log.info("AX: invalid cursor")
+            return false
+        }
+
+        // Calculate replacement range
+        var start = cursorPos - bs
+        if start < 0 { start = 0 }
+        var length = cursorPos - start
+        if length < 0 { length = 0 }
+        if start + length > currentText.count {
+            length = currentText.count - start
+            if length < 0 { length = 0 }
+        }
+
+        // Build new text by replacing characters
+        let textChars = Array(currentText)
+        let startIndex = start
+        let endIndex = start + length
+        var newChars = Array(textChars[0..<startIndex])
+        newChars.append(contentsOf: text)
+        if endIndex < textChars.count {
+            newChars.append(contentsOf: textChars[endIndex...])
+        }
+        let newText = String(newChars)
+
+        // Convert to precomposed Unicode (important for Spotlight)
+        // This prevents decomposed diacritics from causing display issues
+        let precomposedText = newText.precomposedStringWithCanonicalMapping
+
+        // Set new value
+        let setResult = AXUIElementSetAttributeValue(axEl, kAXValueAttribute as CFString, precomposedText as CFTypeRef)
+        guard setResult == .success else {
+            Log.info("AX: can't set value (err=\(setResult.rawValue))")
+            return false
+        }
+
+        // Update cursor position to end of inserted text
+        let newCursorPos = start + text.count
+        var newRange = CFRange(location: newCursorPos, length: 0)
+        if let newRangeValue = AXValueCreate(.cfRange, &newRange) {
+            AXUIElementSetAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, newRangeValue)
+        }
+
+        Log.send("ax", bs, text)
+        return true
+    }
+
+    /// Try AX injection with retries, fallback to synthetic events if all fail
+    /// Spotlight can be busy searching, causing AX API to fail temporarily
+    func injectViaAXWithFallback(bs: Int, text: String, proxy: CGEventTapProxy) {
+        // Try AX API up to 3 times (Spotlight might be busy)
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                usleep(5000)  // 5ms delay before retry
+            }
+            if injectViaAX(bs: bs, text: text) {
+                return  // Success!
+            }
+        }
+
+        // All AX attempts failed - fallback to autocomplete method
+        Log.info("AX: fallback to autocomplete")
+        injectViaAutocomplete(bs: bs, text: text, proxy: proxy)
     }
 
     // MARK: - Helpers
@@ -796,8 +906,8 @@ private func keyboardCallback(
     // Backspace handling: try to restore word from screen when backspacing into it
     // This enables editing marks on previously committed words
     if keyCode == KeyCode.backspace && !ctrl {
-        // For selectAll method: handle backspace
-        if method == .selectAll {
+        // For selectAll method: handle backspace (only when enabled)
+        if method == .selectAll && AppState.shared.isEnabled {
             let session = TextInjector.shared.getSessionBuffer()
             if !session.isEmpty {
                 // Session has content - remove last char and re-inject
@@ -839,7 +949,7 @@ private func keyboardCallback(
 
     // For selectAll method: handle pass-through keys (space, punctuation, etc.)
     // These need to be appended to session buffer and trigger Cmd+A replacement
-    if method == .selectAll {
+    if method == .selectAll && AppState.shared.isEnabled {
         // Convert keyCode to character
         if let char = keyCodeToChar(keyCode: keyCode, shift: shift) {
             TextInjector.shared.updateSessionBuffer(backspace: 0, newText: String(char))
@@ -958,15 +1068,12 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
     if role == "AXComboBox" { Log.method("sel:combo"); return (.selection, (0, 0, 0)) }
     if role == "AXSearchField" { Log.method("sel:search"); return (.selection, (0, 0, 0)) }
 
-    // Spotlight - use selectAll for macOS 13 and earlier, autocomplete for macOS 14+
-    if bundleId == "com.apple.Spotlight" {
-        if #available(macOS 14, *) {
-            Log.method("auto:spotlight")
-            return (.autocomplete, (0, 0, 0))
-        } else {
-            Log.method("selAll:spotlight")
-            return (.selectAll, (0, 0, 0))
-        }
+    // Spotlight - use AX API direct manipulation (works on macOS 13+)
+    // This bypasses Spotlight's autocomplete behavior by directly setting text field value
+    // Note: Spotlight can run under com.apple.systemuiserver in some cases
+    if bundleId == "com.apple.Spotlight" || bundleId == "com.apple.systemuiserver" {
+        Log.method("ax:spotlight")
+        return (.axDirect, (0, 0, 0))
     }
 
     // Arc browser - test Select All method for address bar
