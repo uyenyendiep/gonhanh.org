@@ -271,6 +271,7 @@ class MenuBarController: NSObject, NSWindowDelegate {
         // Sync all engine settings (these were loaded before engine was ready)
         RustBridge.setModernTone(appState.modernTone)
         RustBridge.setSkipWShortcut(!appState.autoWShortcut)
+        RustBridge.setBracketShortcut(appState.bracketShortcut)
         RustBridge.setEscRestore(appState.escRestore)
         RustBridge.setEnglishAutoRestore(appState.englishAutoRestore)
         RustBridge.setAutoCapitalize(appState.autoCapitalize)

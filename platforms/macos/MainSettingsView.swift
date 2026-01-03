@@ -98,6 +98,13 @@ class AppState: ObservableObject {
         }
     }
 
+    @Published var bracketShortcut: Bool = false {
+        didSet {
+            UserDefaults.standard.set(bracketShortcut, forKey: SettingsKey.bracketShortcut)
+            RustBridge.setBracketShortcut(bracketShortcut)
+        }
+    }
+
     @Published var escRestore: Bool = false {
         didSet {
             UserDefaults.standard.set(escRestore, forKey: SettingsKey.escRestore)
@@ -157,6 +164,7 @@ class AppState: ObservableObject {
         toggleShortcut = KeyboardShortcut.load()
         perAppModeEnabled = defaults.bool(forKey: SettingsKey.perAppMode)
         autoWShortcut = defaults.bool(forKey: SettingsKey.autoWShortcut)
+        bracketShortcut = defaults.bool(forKey: SettingsKey.bracketShortcut)
         escRestore = defaults.bool(forKey: SettingsKey.escRestore)
         modernTone = defaults.bool(forKey: SettingsKey.modernTone)
         englishAutoRestore = defaults.bool(forKey: SettingsKey.englishAutoRestore)
@@ -179,6 +187,7 @@ class AppState: ObservableObject {
         RustBridge.setEnabled(isEnabled)
         RustBridge.setMethod(currentMethod.rawValue)
         RustBridge.setSkipWShortcut(!autoWShortcut)
+        RustBridge.setBracketShortcut(bracketShortcut)
         RustBridge.setEscRestore(escRestore)
         RustBridge.setModernTone(modernTone)
         RustBridge.setEnglishAutoRestore(englishAutoRestore)
@@ -684,6 +693,8 @@ struct SettingsPageView: View {
                 if appState.currentMethod == .telex {
                     Divider().padding(.leading, 12)
                     SettingsToggleRow("Gõ W thành Ư ở đầu từ", isOn: $appState.autoWShortcut)
+                    Divider().padding(.leading, 12)
+                    SettingsToggleRow("Gõ ] thành Ư, [ thành Ơ", isOn: $appState.bracketShortcut)
                 }
             }
             .cardBackground()

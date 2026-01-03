@@ -475,6 +475,7 @@ private let FLAG_KEY_CONSUMED: UInt8 = 0x01  // Key was consumed by shortcut, do
 @_silgen_name("ime_method") private func ime_method(_ method: UInt8)
 @_silgen_name("ime_enabled") private func ime_enabled(_ enabled: Bool)
 @_silgen_name("ime_skip_w_shortcut") private func ime_skip_w_shortcut(_ skip: Bool)
+@_silgen_name("ime_bracket_shortcut") private func ime_bracket_shortcut(_ enabled: Bool)
 @_silgen_name("ime_esc_restore") private func ime_esc_restore(_ enabled: Bool)
 @_silgen_name("ime_free_tone") private func ime_free_tone(_ enabled: Bool)
 @_silgen_name("ime_modern") private func ime_modern(_ modern: Bool)
@@ -540,6 +541,12 @@ class RustBridge {
     static func setSkipWShortcut(_ skip: Bool) {
         ime_skip_w_shortcut(skip)
         Log.info("Skip W shortcut: \(skip)")
+    }
+
+    /// Set whether bracket shortcuts are enabled: ] → ư, [ → ơ (Issue #159)
+    static func setBracketShortcut(_ enabled: Bool) {
+        ime_bracket_shortcut(enabled)
+        Log.info("Bracket shortcut: \(enabled)")
     }
 
     /// Set whether ESC key restores raw ASCII input
