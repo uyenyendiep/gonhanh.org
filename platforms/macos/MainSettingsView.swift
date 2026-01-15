@@ -310,6 +310,11 @@ class AppState: ObservableObject {
         return modes[bundleId] ?? true
     }
 
+    func hasPerAppMode(bundleId: String) -> Bool {
+        let modes = UserDefaults.standard.dictionary(forKey: SettingsKey.perAppModes) as? [String: Bool] ?? [:]
+        return modes[bundleId] != nil
+    }
+
     func setEnabledSilently(_ enabled: Bool) {
         isSilentUpdate = true
         isEnabled = enabled

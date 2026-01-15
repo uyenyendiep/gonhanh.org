@@ -1497,7 +1497,10 @@ class PerAppModeManager {
 
         guard AppState.shared.perAppModeEnabled else { return }
 
-        // Restore saved mode (default ON, only OFF apps are stored)
+        // Only restore saved mode if app was previously remembered
+        // For first-time apps, keep current E/V state (inherit from previous app)
+        guard AppState.shared.hasPerAppMode(bundleId: bundleId) else { return }
+
         let mode = AppState.shared.getPerAppMode(bundleId: bundleId)
         RustBridge.setEnabled(mode)
         AppState.shared.setEnabledSilently(mode)
