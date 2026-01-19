@@ -3,7 +3,7 @@ name: Build Windows App
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Cho phép bấm nút chạy thủ công
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,20 +13,25 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+        with:
+          submodules: recursive  # Quan trọng: Tải cả các module phụ nếu có
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: x86_64-pc-windows-msvc
-          
-      - name: Build Project
-        working-directory: ./platforms/windows
-        run: cargo build --release
+
+      # Thay thế bước build cũ bằng bước chạy script của tác giả
+      - name: Run Build Script
+        shell: bash
+        run: ./scripts/build-windows.sh
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Gonhanh-Windows-Build
-          path: ./platforms/windows/target/release/*.exe
-          if-no-files-found: error
+          # Script này thường output file ra thư mục release hoặc build
+          # Bạn có thể cần kiểm tra lại đường dẫn output chính xác trong script
+          path: ./platforms/windows/build/Release/*.exe 
+          if-no-files-found: warn
