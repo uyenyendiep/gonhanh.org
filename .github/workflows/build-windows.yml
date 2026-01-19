@@ -14,7 +14,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: recursive  # Quan trọng: Tải cả các module phụ nếu có
+          submodules: recursive  # Cực kỳ quan trọng: Giữ nguyên dòng này để fix lỗi thiếu file
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -22,16 +22,17 @@ jobs:
           toolchain: stable
           target: x86_64-pc-windows-msvc
 
-      # Thay thế bước build cũ bằng bước chạy script của tác giả
-      - name: Run Build Script
-        shell: bash
-        run: ./scripts/build-windows.sh
+      # SỬA LẠI 1: Dùng đúng lệnh cargo như hướng dẫn trong ảnh của bạn
+      # Lý do: File ./scripts/build-windows.sh có thể không tồn tại trong repo này
+      - name: Build Project
+        working-directory: ./platforms/windows
+        run: cargo build --release
 
+      # SỬA LẠI 2: Đường dẫn file kết quả của Rust luôn là target/release
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Gonhanh-Windows-Build
-          # Script này thường output file ra thư mục release hoặc build
-          # Bạn có thể cần kiểm tra lại đường dẫn output chính xác trong script
-          path: ./platforms/windows/build/Release/*.exe 
+          # Rust sẽ xuất file exe ra folder này, không phải build/Release
+          path: ./platforms/windows/target/release/*.exe 
           if-no-files-found: warn
